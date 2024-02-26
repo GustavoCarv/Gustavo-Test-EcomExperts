@@ -937,7 +937,7 @@ class SlideshowComponent extends SliderComponent {
     const slideScrollPosition =
       this.slider.scrollLeft +
       this.sliderFirstItemNode.clientWidth *
-        (this.sliderControlLinksArray.indexOf(event.currentTarget) + 1 - this.currentPage);
+      (this.sliderControlLinksArray.indexOf(event.currentTarget) + 1 - this.currentPage);
     this.slider.scrollTo({
       left: slideScrollPosition,
     });
@@ -947,12 +947,20 @@ class SlideshowComponent extends SliderComponent {
 customElements.define('slideshow-component', SlideshowComponent);
 
 class VariantSelects extends HTMLElement {
+  hasOptionWithUnselectedValue = false;
   constructor() {
     super();
     this.addEventListener('change', this.onVariantChange);
+
+    if (this.getIfOptionValueIsUnselected()) {
+      this.toggleAddButton(true, window.variantStrings.addToCart, true);
+      this.setUnavailable(window.variantStrings.addToCart);
+    }
+
   }
 
   onVariantChange(event) {
+
     this.updateOptions();
     this.updateMasterId();
     this.updateSelectedSwatchValue(event);
@@ -960,6 +968,18 @@ class VariantSelects extends HTMLElement {
     this.updatePickupAvailability();
     this.removeErrorMessage();
     this.updateVariantStatuses();
+
+    if (this.hasOptionWithUnselectedValue) {
+      this.updateMedia();
+      this.updateURL();
+      this.updateVariantInput();
+      this.renderProductInfo(false);
+      this.updateShareUrl();
+
+      this.toggleAddButton(true, window.variantStrings.addToCart, true);
+      this.setUnavailable(window.variantStrings.addToCart);
+      return;
+    }
 
     if (!this.currentVariant) {
       this.toggleAddButton(true, '', true);
@@ -973,9 +993,25 @@ class VariantSelects extends HTMLElement {
     }
   }
 
+  getIfOptionValueIsUnselected() {
+    return Array.from(this.querySelectorAll('select'), (element) => {
+
+      if (element.tagName === 'SELECT' && element.value === 'unselected') {
+        return true;
+      }
+    })
+  }
+
   updateOptions() {
     this.options = Array.from(this.querySelectorAll('select, fieldset'), (element) => {
       if (element.tagName === 'SELECT') {
+
+        // If no option is selected, show the default product information
+        if (element.value === 'unselected') {
+          this.hasOptionWithUnselectedValue = true;
+          return Array.from(element.querySelectorAll('option'))[1]?.value
+        }
+        this.hasOptionWithUnselectedValue = false;
         return element.value;
       }
       if (element.tagName === 'FIELDSET') {
@@ -1075,6 +1111,12 @@ class VariantSelects extends HTMLElement {
       if (element.tagName === 'INPUT') {
         element.classList.toggle('disabled', !availableElement);
       } else if (element.tagName === 'OPTION') {
+
+        if (value === 'unselected') {
+          element.innerText = 'Unselected'
+          return;
+        }
+
         element.innerText = availableElement
           ? value
           : window.variantStrings.unavailable_with_option.replace('[value]', value);
@@ -1102,13 +1144,12 @@ class VariantSelects extends HTMLElement {
     if (productForm) productForm.handleErrorMessage();
   }
 
-  renderProductInfo() {
+  renderProductInfo(shouldUptadeButton = true) {
     const requestedVariantId = this.currentVariant.id;
     const sectionId = this.dataset.originalSection ? this.dataset.originalSection : this.dataset.section;
 
     fetch(
-      `${this.dataset.url}?variant=${requestedVariantId}&section_id=${
-        this.dataset.originalSection ? this.dataset.originalSection : this.dataset.section
+      `${this.dataset.url}?variant=${requestedVariantId}&section_id=${this.dataset.originalSection ? this.dataset.originalSection : this.dataset.section
       }`
     )
       .then((response) => response.text())
@@ -1170,10 +1211,14 @@ class VariantSelects extends HTMLElement {
         if (inventoryDestination) inventoryDestination.classList.toggle('hidden', inventorySource.innerText === '');
 
         const addButtonUpdated = html.getElementById(`ProductSubmitButton-${sectionId}`);
-        this.toggleAddButton(
-          addButtonUpdated ? addButtonUpdated.hasAttribute('disabled') : true,
-          window.variantStrings.soldOut
-        );
+
+        if (shouldUptadeButton) {
+          this.toggleAddButton(
+            addButtonUpdated ? addButtonUpdated.hasAttribute('disabled') : true,
+            window.variantStrings.soldOut
+          );
+        }
+
 
         publish(PUB_SUB_EVENTS.variantChange, {
           data: {
@@ -1203,7 +1248,7 @@ class VariantSelects extends HTMLElement {
     if (!modifyClass) return;
   }
 
-  setUnavailable() {
+  setUnavailable(text = '') {
     const button = document.getElementById(`product-form-${this.dataset.section}`);
     const addButton = button.querySelector('[name="add"]');
     const addButtonText = button.querySelector('[name="add"] > span');
@@ -1216,7 +1261,7 @@ class VariantSelects extends HTMLElement {
     const qtyRules = document.getElementById(`Quantity-Rules-${this.dataset.section}`);
 
     if (!addButton) return;
-    addButtonText.textContent = window.variantStrings.unavailable;
+    addButtonText.textContent = text ? text : window.variantStrings.unavailable;
     if (price) price.classList.add('hidden');
     if (inventory) inventory.classList.add('hidden');
     if (sku) sku.classList.add('hidden');
