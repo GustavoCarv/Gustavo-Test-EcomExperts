@@ -1390,19 +1390,22 @@ class CartWatcher {
     }
 
     if (conditionToRemoveProduct && hasPromotionalItemInCart) {
-      try { 
-        await fetch('/cart/change.js', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify( 
-            {
-              id: '43407119941809',
-              quantity: 0
-            }
-          )
-        })
+      try {
+        // Remove promotional product and update Cart UI
+        function updateCartUI() {
+          const cart = document.querySelector('cart-items') || document.querySelector('cart-drawer-items');
+
+          if (!cart) return;
+
+          const promotionalItem = cart.querySelector("cart-remove-button a[href*='43407119941809']");
+          const promotionalItemIndex = promotionalItem?.closest('cart-remove-button')?.dataset?.index
+
+          if (!promotionCondition) return;
+
+          cart.updateQuantity(promotionalItemIndex, 0)
+        }
+
+        updateCartUI()
       } catch (error) {
         console.error(error)
       }
