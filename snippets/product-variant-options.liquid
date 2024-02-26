@@ -6,6 +6,7 @@
   - option: {Object} current product_option object.
   - block: {Object} block object.
   - picker_type: {String} type of picker to dispay
+  - has_default_option_selected: {Boolean} whether the option is selected or not on dropdown
 
 
   Usage:
@@ -14,6 +15,7 @@
     option: option,
     block: block
     picker_type: picker_type
+    has_default_option_selected: boolean
   %}
 {% endcomment %}
 {%- liquid
@@ -102,10 +104,10 @@
     </label>
   {%- elsif picker_type == 'dropdown' or picker_type == 'swatch_dropdown' -%}
     <option
-      value="{{ value | escape }}"
-      {% if option.selected_value == value %}
-        selected="selected"
-      {% endif %}
+      value="{{ value | escape }}"         
+        {% if option.selected_value == value  and has_default_option_selected %}
+          selected="selected"
+        {% endif %}      
       {% if swatch_value and picker_type == 'swatch_dropdown' %}
         data-option-swatch-value="{{ swatch_value }}"
       {% endif %}

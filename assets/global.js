@@ -937,7 +937,7 @@ class SlideshowComponent extends SliderComponent {
     const slideScrollPosition =
       this.slider.scrollLeft +
       this.sliderFirstItemNode.clientWidth *
-        (this.sliderControlLinksArray.indexOf(event.currentTarget) + 1 - this.currentPage);
+      (this.sliderControlLinksArray.indexOf(event.currentTarget) + 1 - this.currentPage);
     this.slider.scrollTo({
       left: slideScrollPosition,
     });
@@ -947,12 +947,19 @@ class SlideshowComponent extends SliderComponent {
 customElements.define('slideshow-component', SlideshowComponent);
 
 class VariantSelects extends HTMLElement {
+  hasOptionWithUnselectedValue = false;
   constructor() {
     super();
     this.addEventListener('change', this.onVariantChange);
+
+    if (this.getIfOptionValueIsUnselected()) {
+      this.toggleAddButton(true, window.variantStrings.addToCart, true);
+    }
+
   }
 
   onVariantChange(event) {
+
     this.updateOptions();
     this.updateMasterId();
     this.updateSelectedSwatchValue(event);
@@ -960,6 +967,18 @@ class VariantSelects extends HTMLElement {
     this.updatePickupAvailability();
     this.removeErrorMessage();
     this.updateVariantStatuses();
+
+    if (this.hasOptionWithUnselectedValue) {
+      this.updateMedia();
+      this.updateURL();
+      this.updateVariantInput();
+      this.renderProductInfo(false);
+      this.updateShareUrl();
+
+      this.toggleAddButton(true, window.variantStrings.addToCart, true);
+      this.setUnavailable(window.variantStrings.addToCart);
+      return;
+    }
 
     if (!this.currentVariant) {
       this.toggleAddButton(true, '', true);
@@ -973,9 +992,25 @@ class VariantSelects extends HTMLElement {
     }
   }
 
+  getIfOptionValueIsUnselected() {
+    return Array.from(this.querySelectorAll('select'), (element) => {
+
+      if (element.tagName === 'SELECT' && element.value === 'unselected') {
+        return true;
+      }
+    })
+  }
+
   updateOptions() {
     this.options = Array.from(this.querySelectorAll('select, fieldset'), (element) => {
       if (element.tagName === 'SELECT') {
+
+        // If no option is selected, show the default product information
+        if (element.value === 'unselected') {
+          this.hasOptionWithUnselectedValue = true;
+          return Array.from(element.querySelectorAll('option'))[1]?.value
+        }
+        this.hasOptionWithUnselectedValue = false;
         return element.value;
       }
       if (element.tagName === 'FIELDSET') {
@@ -1075,6 +1110,12 @@ class VariantSelects extends HTMLElement {
       if (element.tagName === 'INPUT') {
         element.classList.toggle('disabled', !availableElement);
       } else if (element.tagName === 'OPTION') {
+
+        if (value === 'unselected') {
+          element.innerText = 'Unselected'
+          return;
+        }
+
         element.innerText = availableElement
           ? value
           : window.variantStrings.unavailable_with_option.replace('[value]', value);
@@ -1102,13 +1143,12 @@ class VariantSelects extends HTMLElement {
     if (productForm) productForm.handleErrorMessage();
   }
 
-  renderProductInfo() {
+  renderProductInfo(shouldUptadeButton = true) {
     const requestedVariantId = this.currentVariant.id;
     const sectionId = this.dataset.originalSection ? this.dataset.originalSection : this.dataset.section;
 
     fetch(
-      `${this.dataset.url}?variant=${requestedVariantId}&section_id=${
-        this.dataset.originalSection ? this.dataset.originalSection : this.dataset.section
+      `${this.dataset.url}?variant=${requestedVariantId}&section_id=${this.dataset.originalSection ? this.dataset.originalSection : this.dataset.section
       }`
     )
       .then((response) => response.text())
@@ -1170,10 +1210,14 @@ class VariantSelects extends HTMLElement {
         if (inventoryDestination) inventoryDestination.classList.toggle('hidden', inventorySource.innerText === '');
 
         const addButtonUpdated = html.getElementById(`ProductSubmitButton-${sectionId}`);
-        this.toggleAddButton(
-          addButtonUpdated ? addButtonUpdated.hasAttribute('disabled') : true,
-          window.variantStrings.soldOut
-        );
+
+        if (shouldUptadeButton) {
+          this.toggleAddButton(
+            addButtonUpdated ? addButtonUpdated.hasAttribute('disabled') : true,
+            window.variantStrings.soldOut
+          );
+        }
+
 
         publish(PUB_SUB_EVENTS.variantChange, {
           data: {
@@ -1203,7 +1247,7 @@ class VariantSelects extends HTMLElement {
     if (!modifyClass) return;
   }
 
-  setUnavailable() {
+  setUnavailable(text = '') {
     const button = document.getElementById(`product-form-${this.dataset.section}`);
     const addButton = button.querySelector('[name="add"]');
     const addButtonText = button.querySelector('[name="add"] > span');
@@ -1216,7 +1260,7 @@ class VariantSelects extends HTMLElement {
     const qtyRules = document.getElementById(`Quantity-Rules-${this.dataset.section}`);
 
     if (!addButton) return;
-    addButtonText.textContent = window.variantStrings.unavailable;
+    addButtonText.textContent = text ? text : window.variantStrings.unavailable;
     if (price) price.classList.add('hidden');
     if (inventory) inventory.classList.add('hidden');
     if (sku) sku.classList.add('hidden');
@@ -1273,3 +1317,128 @@ class ProductRecommendations extends HTMLElement {
 }
 
 customElements.define('product-recommendations', ProductRecommendations);
+
+
+/* Custom class to observe cart changes */
+class CartWatcher {
+
+  init() {
+    this.emitCartChanges().then(() => {
+      this.observeCartChanges();
+    });
+  }
+
+  async fetchCart() {
+    const response = await fetch('/cart.js');
+    return response.json();
+  }
+
+  storeCart(cart) {
+    localStorage.setItem('cart', JSON.stringify(cart));
+  }
+
+  storedCart() {
+    return JSON.parse(localStorage.getItem('cart')) || { items: [] };
+  }
+
+  findCartChanges(oldCart, newCart) {
+    const onlyInLeft = (l, r) => l.filter(li => !r.some(ri => li.key == ri.key));
+    let result = {
+      added: onlyInLeft(newCart.items, oldCart.items),
+      removed: onlyInLeft(oldCart.items, newCart.items),
+    };
+
+    oldCart.items.forEach(oi => {
+      const ni = newCart.items.find(i => i.key == oi.key && i.quantity != oi.quantity);
+      if (!ni) return;
+      let quantity = ni.quantity - oi.quantity;
+      let item = { ...ni };
+      item.quantity = Math.abs(quantity);
+      quantity > 0
+        ? result.added.push(item)
+        : result.removed.push(item)
+    });
+
+    return result;
+  }
+
+  async handlePromotionalProduct(promotionCondition, newCart) {
+    const { added } = promotionCondition
+    const conditionToAddProduct = added.find(item => item.id === 43412060995761)
+    const conditionToRemoveProduct = !newCart.items.find(item => item.id === 43412060995761)
+    const hasPromotionalItemInCart = newCart.items.find(item => item.id === 43407119941809)
+
+    if (conditionToAddProduct && !hasPromotionalItemInCart) {
+      try {
+        await fetch('/cart/add.js', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            items: [
+              {
+                id: '43407119941809',
+                quantity: 1
+              }
+            ]
+          })
+        })
+      } catch (error) {
+        console.error(error)
+      }
+    }
+
+    if (conditionToRemoveProduct && hasPromotionalItemInCart) {
+      try {
+        // Remove promotional product and update Cart UI
+        function updateCartUI() {
+          const cart = document.querySelector('cart-items') || document.querySelector('cart-drawer-items');
+
+          if (!cart) return;
+
+          const promotionalItem = cart.querySelector("cart-remove-button a[href*='43407119941809']");
+          const promotionalItemIndex = promotionalItem?.closest('cart-remove-button')?.dataset?.index
+
+          if (!promotionCondition) return;
+
+          cart.updateQuantity(promotionalItemIndex, 0)
+        }
+
+        updateCartUI()
+      } catch (error) {
+        console.error(error)
+      }
+    }
+
+  }
+
+  async emitCartChanges() {
+    const newCart = await this.fetchCart();
+    const oldCart = this.storedCart();
+    const changes = this.findCartChanges(oldCart, newCart);
+
+    // Handle inclusion or removal of promotional product when conditions are met.
+    await this.handlePromotionalProduct(changes, newCart)
+
+    this.storeCart(newCart);
+  }
+
+  observeCartChanges() {
+    const cartObserver = new PerformanceObserver((list) => {
+      list.getEntries().forEach((entry) => {
+        const isValidRequestType = ['xmlhttprequest', 'fetch'].includes(entry.initiatorType);
+        const isCartChangeRequest = /\/cart\//.test(entry.name);
+        if (isValidRequestType && isCartChangeRequest) {
+          this.emitCartChanges();
+        }
+      });
+    });
+    cartObserver.observe({ entryTypes: ["resource"] });
+  }
+}
+
+window.addEventListener('DOMContentLoaded', () => {
+  const cartWatcher = new CartWatcher();
+  cartWatcher.init();
+})
