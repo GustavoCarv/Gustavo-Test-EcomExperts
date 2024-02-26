@@ -954,7 +954,6 @@ class VariantSelects extends HTMLElement {
 
     if (this.getIfOptionValueIsUnselected()) {
       this.toggleAddButton(true, window.variantStrings.addToCart, true);
-      this.setUnavailable(window.variantStrings.addToCart);
     }
 
   }
@@ -1318,3 +1317,125 @@ class ProductRecommendations extends HTMLElement {
 }
 
 customElements.define('product-recommendations', ProductRecommendations);
+
+
+/* Custom class to observe cart changes */
+class CartWatcher {
+
+  init() {
+    this.emitCartChanges().then(() => {
+      this.observeCartChanges();
+    });
+  }
+
+  async fetchCart() {
+    const response = await fetch('/cart.js');
+    return response.json();
+  }
+
+  storeCart(cart) {
+    localStorage.setItem('cart', JSON.stringify(cart));
+  }
+
+  storedCart() {
+    return JSON.parse(localStorage.getItem('cart')) || { items: [] };
+  }
+
+  findCartChanges(oldCart, newCart) {
+    const onlyInLeft = (l, r) => l.filter(li => !r.some(ri => li.key == ri.key));
+    let result = {
+      added: onlyInLeft(newCart.items, oldCart.items),
+      removed: onlyInLeft(oldCart.items, newCart.items),
+    };
+
+    oldCart.items.forEach(oi => {
+      const ni = newCart.items.find(i => i.key == oi.key && i.quantity != oi.quantity);
+      if (!ni) return;
+      let quantity = ni.quantity - oi.quantity;
+      let item = { ...ni };
+      item.quantity = Math.abs(quantity);
+      quantity > 0
+        ? result.added.push(item)
+        : result.removed.push(item)
+    });
+
+    return result;
+  }
+
+  async handlePromotionalProduct(promotionCondition, newCart) {
+    const { added } = promotionCondition
+    const conditionToAddProduct = added.find(item => item.id === 43412060995761)
+    const conditionToRemoveProduct = !newCart.items.find(item => item.id === 43412060995761)
+    const hasPromotionalItemInCart = newCart.items.find(item => item.id === 43407119941809)
+
+    if (conditionToAddProduct && !hasPromotionalItemInCart) {
+      try {
+        await fetch('/cart/add.js', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            items: [
+              {
+                id: '43407119941809',
+                quantity: 1
+              }
+            ]
+          })
+        })
+      } catch (error) {
+        console.error(error)
+      }
+    }
+
+    if (conditionToRemoveProduct && hasPromotionalItemInCart) {
+      try { 
+        await fetch('/cart/change.js', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify( 
+            {
+              id: '43407119941809',
+              quantity: 0
+            }
+          )
+        })
+      } catch (error) {
+        console.error(error)
+      }
+    }
+
+  }
+
+  async emitCartChanges() {
+    const newCart = await this.fetchCart();
+    const oldCart = this.storedCart();
+    const changes = this.findCartChanges(oldCart, newCart);
+
+    // Handle inclusion or removal of promotional product when conditions are met.
+    await this.handlePromotionalProduct(changes, newCart)
+
+    this.storeCart(newCart);
+  }
+
+  observeCartChanges() {
+    const cartObserver = new PerformanceObserver((list) => {
+      list.getEntries().forEach((entry) => {
+        const isValidRequestType = ['xmlhttprequest', 'fetch'].includes(entry.initiatorType);
+        const isCartChangeRequest = /\/cart\//.test(entry.name);
+        if (isValidRequestType && isCartChangeRequest) {
+          this.emitCartChanges();
+        }
+      });
+    });
+    cartObserver.observe({ entryTypes: ["resource"] });
+  }
+}
+
+window.addEventListener('DOMContentLoaded', () => {
+  const cartWatcher = new CartWatcher();
+  cartWatcher.init();
+})
